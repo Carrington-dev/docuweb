@@ -177,7 +177,7 @@ Add to `MIDDLEWARE` in `settings.py`.
 
 ## 📄 License
 
-MIT License © 2025 \[Your Name / Company]
+MIT License © 2025 Khano
 
 ---
 
@@ -185,9 +185,3 @@ MIT License © 2025 \[Your Name / Company]
 
 Open an issue or contact us at [support@stemgon.com](mailto:support@stemgon.com)
 
-```
-
----
-
-Let me know if you'd like a version that uses **cookies for storing JWTs**, adds **refresh token support**, or integrates with **Next.js frontend**.
-```
