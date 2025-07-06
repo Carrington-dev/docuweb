@@ -1,8 +1,3 @@
-Here's a professional and comprehensive `README.md` for integrating Microsoft Azure Active Directory authentication into a Django application using JWT (JSON Web Tokens):
-
----
-
-````markdown
 # Django Microsoft Azure AD Authentication with JWT
 
 This project demonstrates how to integrate **Microsoft Azure Active Directory (Azure AD)** authentication with a Django backend using the **OAuth 2.0 Authorization Code Flow**. Upon successful login, a JWT token is issued to the frontend (e.g., Next.js) for use in subsequent API requests.
