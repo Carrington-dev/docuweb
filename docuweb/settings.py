@@ -44,9 +44,23 @@ INSTALLED_APPS = [
 
 INSTALLED_APPS.append("security")
 
+INSTALLED_APPS += ['corsheaders', 'rest_framework']
+
+
+CORS_ALLOWED_ORIGINS = ['http://localhost:3000']
+CORS_ALLOW_CREDENTIALS = True
+
+# JWT secret
+JWT_ALGORITHM = 'HS256'
+
+# Azure
+
+
+
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
+    "corsheaders.middleware.CorsMiddleware",
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
@@ -54,6 +68,7 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     # 'security.middlewares.MicrosoftJWTAuthenticationMiddleware',
 ]
+
 
 ROOT_URLCONF = 'docuweb.urls'
 
@@ -130,31 +145,31 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 AUTH_USER_MODEL = "security.User"
 
-MICROSOFT_AUTH = {
-    "CLIENT_ID": config("CLIENT_ID"),
-    "CLIENT_SECRET": config("CLIENT_SECRET"),
-    "TENANT_ID": config("TENANT_ID"),
-    "REDIRECT_URI": f"http://localhost:8000/api/auth/callback",
-    "AUTHORITY": f"https://login.microsoftonline.com/{  config("TENANT_ID") }",
-    "TOKEN_URL": f"https://login.microsoftonline.com/{  config("TENANT_ID") }/oauth2/v2.0/token",
-    "JWKS_URI": f"https://login.microsoftonline.com/{  config("TENANT_ID") }/discovery/v2.0/keys",
-    "ISSUER": f"https://login.microsoftonline.com/{  config("TENANT_ID") }/v2.0",
-    "SCOPE": f"{config("SCOPE")}",
-    "FRONTEND_REDIRECT_URI": "http://localhost:3000/dashboard"
-}
+# MICROSOFT_AUTH = {
+#     "CLIENT_ID": config("CLIENT_ID"),
+#     "CLIENT_SECRET": config("CLIENT_SECRET"),
+#     "TENANT_ID": config("TENANT_ID"),
+#     "REDIRECT_URI": f"http://localhost:8000/api/auth/callback",
+#     "AUTHORITY": f"https://login.microsoftonline.com/{  config("TENANT_ID") }",
+#     "TOKEN_URL": f"https://login.microsoftonline.com/{  config("TENANT_ID") }/oauth2/v2.0/token",
+#     "JWKS_URI": f"https://login.microsoftonline.com/{  config("TENANT_ID") }/discovery/v2.0/keys",
+#     "ISSUER": f"https://login.microsoftonline.com/{  config("TENANT_ID") }/v2.0",
+#     "SCOPE": f"{config("SCOPE")}",
+#     "FRONTEND_REDIRECT_URI": "http://localhost:3000/dashboard"
+# }
 
 
 # Microsoft Identity Platform settings
-MICROSOFT_CLIENT_ID = "<your-client-id>"
-MICROSOFT_CLIENT_SECRET = "<your-client-secret>"
-MICROSOFT_AUTHORITY = "https://login.microsoftonline.com/<your-tenant-id>"  # Or 'common' for multi-tenant
-MICROSOFT_AUTHORIZE_URL = f"{MICROSOFT_AUTHORITY}/oauth2/v2.0/authorize"
-MICROSOFT_TOKEN_URL = f"{MICROSOFT_AUTHORITY}/oauth2/v2.0/token"
-MICROSOFT_USERINFO_URL = "https://graph.microsoft.com/oidc/userinfo"
-MICROSOFT_LOGOUT_URL = f"{MICROSOFT_AUTHORITY}/oauth2/v2.0/logout"
-MICROSOFT_REDIRECT_URI = "<your-redirect-uri>"  # e.g., https://yourapp.com/api/auth/callback
+AZURE_AD_CLIENT_ID = config("CLIENT_ID")
+AZURE_AD_CLIENT_SECRET = config("CLIENT_SECRET")
+AZURE_AD_TENANT_ID = config("TENANT_ID")
+AZURE_AD_AUTHORITY = f"https://login.microsoftonline.com/{AZURE_AD_TENANT_ID}"
+AZURE_AD_REDIRECT_URI = "http://localhost:8000/api/v1/auth/callback"
+AZURE_AD_SCOPE = ["User.Read"]
+JWT_SECRET = config("SECRET_KEY")
 
 LOGIN_REDIRECT_URL = "/dashboard"
 LOGIN_URL = "/"
 ADMIN_EMAILS = ["admin@example.com"]  # Optional
 IS_LOCAL = config("IS_LOCAL", False)
+POST_LOGOUT_REDIRECT_URI="http://localhost:3000/login"

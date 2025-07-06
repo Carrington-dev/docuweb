@@ -1,86 +1,79 @@
-import logging
-import os
-import uuid
-from urllib.parse import urlencode
-
-import requests
+from msal import ConfidentialClientApplication
 from django.conf import settings
-from django.contrib.auth import get_user_model, login, logout
 from django.shortcuts import redirect
-from oauthlib.oauth2 import WebApplicationClient
+from django.http import JsonResponse
+from django.contrib.auth import get_user_model, login, logout
+from msal import ConfidentialClientApplication
+from jose import jwt
+import time
+import logging
+from urllib.parse import urlencode
+from django.shortcuts import redirect
+from django.contrib.auth import logout
+from django.conf import settings
+from django.views.decorators.csrf import csrf_exempt
 
 logger = logging.getLogger(__name__)
 
-if settings.IS_LOCAL:
-    os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
 
-def microsoft_login(request):
-    client = WebApplicationClient(settings.MICROSOFT_CLIENT_ID)
-
-    state = str(uuid.uuid4())
-    request.session["oauth_state"] = state
-    request.session["next"] = request.GET.get("next", "")
-
-    auth_url = client.prepare_request_uri(
-        settings.MICROSOFT_AUTHORIZE_URL,
-        redirect_uri=settings.MICROSOFT_REDIRECT_URI,
-        scope=["openid", "profile", "email", "offline_access", "User.Read"],
-        state=state,
-        response_mode="query",
-        prompt="select_account",
+def auth_login(request):
+    msal_app = ConfidentialClientApplication(
+        client_id=settings.AZURE_AD_CLIENT_ID,
+        client_credential=settings.AZURE_AD_CLIENT_SECRET,
+        authority=settings.AZURE_AD_AUTHORITY,
     )
-
-    logger.info(f"Redirecting to Microsoft login: {auth_url}")
+    auth_url = msal_app.get_authorization_request_url(
+        scopes=settings.AZURE_AD_SCOPE,
+        redirect_uri=settings.AZURE_AD_REDIRECT_URI,
+    )
     return redirect(auth_url)
 
-def microsoft_callback(request):
-    client = WebApplicationClient(settings.MICROSOFT_CLIENT_ID)
 
-    auth_code = request.GET.get("code")
 
-    token_url, headers, body = client.prepare_token_request(
-        settings.MICROSOFT_TOKEN_URL,
-        authorization_response=request.build_absolute_uri(),
-        redirect_url=settings.MICROSOFT_REDIRECT_URI,
-        code=auth_code,
+def auth_callback(request):
+    code = request.GET.get("code")
+    logger.info(f"Logging out Missing code: {code}")
+
+    if not code:
+        return JsonResponse({"error": "Missing code"}, status=400)
+    #     return JsonResponse({
+    #         "error": "Missing code",
+    #         "query_params": request.GET.dict()
+    #     }, status=400)
+
+
+    msal_app = ConfidentialClientApplication(
+        client_id=settings.AZURE_AD_CLIENT_ID,
+        client_credential=settings.AZURE_AD_CLIENT_SECRET,
+        authority=settings.AZURE_AD_AUTHORITY,
     )
 
-    if isinstance(body, str):
-        body = dict(param.split("=") for param in body.split("&"))
-    if "client_id" in body:
-        body.pop("client_id")
-    body["redirect_uri"] = settings.MICROSOFT_REDIRECT_URI
-
-    response = requests.post(
-        token_url,
-        headers=headers,
-        data=body,
-        auth=(settings.MICROSOFT_CLIENT_ID, settings.MICROSOFT_CLIENT_SECRET),
+    result = msal_app.acquire_token_by_authorization_code(
+        code,
+        scopes=settings.AZURE_AD_SCOPE,
+        redirect_uri=settings.AZURE_AD_REDIRECT_URI,
     )
 
-    client.parse_request_body_response(response.text)
+    if "id_token_claims" not in result:
+        return JsonResponse({"error": "Token acquisition failed", "details": result}, status=400)
 
-    request.session["id_token"] = client.token.get("id_token")
+    claims = result["id_token_claims"]
+    email = claims.get("preferred_username") or claims.get("email")
 
-    # Fetch user info from Microsoft Graph
-    userinfo_response = requests.get(
-        settings.MICROSOFT_USERINFO_URL,
-        headers={"Authorization": f"Bearer {client.token['access_token']}"},
-    )
-
-    user_info = userinfo_response.json()
+    # Optionally create or update user in your DB
     User = get_user_model()
-
     user, created = User.objects.get_or_create(
-        email=user_info["email"],
+        email=claims["email"],
         defaults={
-            "first_name": user_info.get("given_name", ""),
-            "last_name": user_info.get("family_name", ""),
+            "first_name": claims.get("given_name", ""),
+            "last_name": claims.get("family_name", ""),
         },
     )
-
     user.backend = "django.contrib.auth.backends.ModelBackend"
-    if user.email in settings.ADMIN_EMAILS:
+    email = user.email
+    if email in settings.ADMIN_EMAILS:
         user.is_staff = True
         user.is_superuser = True
     else:
@@ -88,81 +81,53 @@ def microsoft_callback(request):
         user.is_superuser = False
 
     user.save()
+    # Check why verification screen isn't popping up
+
     login(request, user)
 
-    next = request.session.get("next")
-    return redirect(next or settings.LOGIN_REDIRECT_URL)
+    next = request.session.get("next", None)
+    if next:
+        return redirect(request.build_absolute_uri(next))
+    # ...
 
-def microsoft_logout(request):
+    jwt_token = jwt.encode({
+        "sub": claims["oid"],
+        "email": email,
+        "name": claims.get("name"),
+        "exp": int(time.time()) + 3600,
+    }, settings.JWT_SECRET, algorithm="HS256")
+
+    return JsonResponse({"token": jwt_token})
+
+
+@csrf_exempt
+def protected_view(request):
+    if not hasattr(request, "user_email"):
+        return JsonResponse({"error": "Unauthorized"}, status=401)
+    return JsonResponse({"message": f"Hello, {request.user_email}!"})
+
+
+
+@csrf_exempt
+def logout_view(request):
+    # Optionally get the Microsoft ID token
     id_token = request.session.pop("id_token", None)
+
+    # Construct logout parameters
     logout_params = {
-        "post_logout_redirect_uri": request.build_absolute_uri(settings.LOGIN_URL),
+        "post_logout_redirect_uri": settings.POST_LOGOUT_REDIRECT_URI,
     }
     if id_token:
-        logout_params["id_token_hint"] = id_token
+        logout_params["id_token_hint"] = id_token  # Optional for Microsoft
 
-    logout_url = f"{settings.MICROSOFT_LOGOUT_URL}?{urlencode(logout_params)}"
-
-    logger.info(f"Redirecting to Microsoft logout: {logout_url}")
-    logout(request)
-    return redirect(logout_url)
-
-
-import requests
-from jose import jwt as jose_jwt
-from django.conf import settings
-from django.http import JsonResponse
-from django.contrib.auth import get_user_model
-from rest_framework.decorators import api_view
-from .utils.jwt import generate_jwt
-
-User = get_user_model()
-
-@api_view(['POST'])
-def microsoft_callback(request):
-    code = request.data.get('code')
-    if not code:
-        return JsonResponse({'error': 'Missing code'}, status=400)
-
-    tenant_id = settings.MICROSOFT['TENANT_ID']
-    token_url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
-
-    data = {
-        'client_id': settings.MICROSOFT['CLIENT_ID'],
-        'client_secret': settings.MICROSOFT['CLIENT_SECRET'],
-        'grant_type': 'authorization_code',
-        'code': code,
-        'redirect_uri': settings.MICROSOFT['REDIRECT_URI'],
-    }
-
-    headers = { 'Content-Type': 'application/x-www-form-urlencoded' }
-
-    token_res = requests.post(token_url, data=data, headers=headers)
-    if token_res.status_code != 200:
-        return JsonResponse({'error': 'Token exchange failed'}, status=400)
-
-    tokens = token_res.json()
-    id_token = tokens.get('id_token')
-
-    claims = jose_jwt.decode(id_token, options={"verify_signature": False})
-    email = claims.get('preferred_username')
-    first_name = claims.get('given_name', '')
-    last_name = claims.get('family_name', '')
-
-    user, created = User.objects.get_or_create(email=email, defaults={
-        'first_name': first_name,
-        'last_name': last_name,
-        'username': email,
-    })
-
-    jwt_token = generate_jwt(user)
-
-    response = JsonResponse({'status': 'ok'})
-    response.set_cookie(
-        key='jwt',
-        value=jwt_token,
-        httponly=True,
-        secure=False,  # Set to True in production with HTTPS
-        samesite='Lax'
+    logout_url = (
+        f"https://login.microsoftonline.com/{settings.AZURE_AD_TENANT_ID}/oauth2/v2.0/logout?"
+        f"{urlencode(logout_params)}"
     )
-    return response
+
+    logger.info(f"Logging out user and redirecting to Microsoft logout: {logout_url}")
+
+    # Clear Django session after logout redirect is created
+    logout(request)
+
+    return redirect(logout_url)
